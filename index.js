@@ -52,7 +52,7 @@ const commands = [
 
     new SlashCommandBuilder()
         .setName('roblox-calcu')
-        .setDescription('Calculate Roblox gamepass taxes based on a target or listing amount')
+        .setDescription('Calculate Roblox gamepass taxes accurately')
         .addNumberOption(option =>
             option.setName('amount')
                 .setDescription('The Robux amount (target to receive or listing price)')
@@ -118,10 +118,10 @@ client.on('interactionCreate', async (interaction) => {
         try {
             let processedExpr = exprInput.trim().toLowerCase();
 
-            // 1. Check for Roblox Tax shorthands (ct & nct)
+            // 1. Roblox Tax shorthands (ct & nct)
             if (/^\d+(?:\.\d+)?\s*ct$/.test(processedExpr)) {
                 const target = parseFloat(processedExpr);
-                const listPrice = Math.ceil(target / 0.7);
+                const listPrice = Math.ceil(target / 0.7); // Standard RBXTax math logic
                 const embed = new EmbedBuilder()
                     .setColor(PASTEL_BLUE)
                     .setDescription(`\` input \` : ${exprInput}\n\` result (Covered Tax) \` : List at **${listPrice.toLocaleString()}** Robux to receive **${target.toLocaleString()}**`);
@@ -137,10 +137,10 @@ client.on('interactionCreate', async (interaction) => {
                 return interaction.reply({ embeds: [embed] });
             }
 
-            // 2. Support square root function
+            // 2. Square root function support
             processedExpr = processedExpr.replace(/sqrt\s*\(([^)]+)\)/g, 'Math.sqrt($1)');
 
-            // 3. Replace 'k' and 'm' suffixes dynamically
+            // 3. Shorthand multipliers 'k' and 'm'
             processedExpr = processedExpr.replace(/(\d+(?:\.\d+)?)\s*([km])/gi, (match, num, suffix) => {
                 const multiplier = suffix.toLowerCase() === 'k' ? 1000 : 1000000;
                 return parseFloat(num) * multiplier;
@@ -173,15 +173,15 @@ client.on('interactionCreate', async (interaction) => {
     if (commandName === 'roblox-calcu') {
         const amount = interaction.options.getNumber('amount');
 
-        // Calculations
-        const coveredTaxPrice = Math.ceil(amount / 0.7); // What to list if 'amount' is what you want to receive
-        const nonCoveredTax = Math.floor(amount * 0.7);     // What you receive if 'amount' is what you list
+        // Accurate marketplace tax formulas (matching standard tools like RBXTax)
+        const coveredTaxPrice = Math.ceil(amount / 0.7); // Price to list so you receive 'amount' exactly
+        const nonCoveredTax = Math.floor(amount * 0.7);     // What you receive if you list at 'amount'
 
         const embed = new EmbedBuilder()
             .setColor(PASTEL_BLUE)
             .setDescription(
                 `_ _\n` +
-                `**price to pay / target** : \` ${amount.toLocaleString()} \`\n` +
+                `**price to pay** : \` ${amount.toLocaleString()} \`\n` +
                 `**covered tax price** : \` ${coveredTaxPrice.toLocaleString()} \`\n` +
                 `**non-covered tax** : \` ${nonCoveredTax.toLocaleString()} \`\n` +
                 `_ _`
