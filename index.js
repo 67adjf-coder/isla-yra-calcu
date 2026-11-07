@@ -31,6 +31,19 @@ const PASTEL_BLUE = 0xAEC6CF;
 const activeVouches = new Map();
 const activeStickies = new Map(); // Map<channelId, { message, lastMessageId }>
 
+// Helper to generate a random unique 6-character alphanumeric code
+function generateUniqueVouchCode() {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    let code = '';
+    do {
+        code = '';
+        for (let i = 0; i < 6; i++) {
+            code += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+    } while (activeVouches.has(code));
+    return code;
+}
+
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -64,8 +77,7 @@ const commands = [
     new SlashCommandBuilder()
         .setName('vouch')
         .setDescription('Create a vouch timer and requirement for a buyer')
-        .addUserOption(opt => opt.setName('buyer').setDescription('Select the buyer').setRequired(true))
-        .addStringOption(opt => opt.setName('vouch-code').setDescription('Enter the unique vouch code').setRequired(true)),
+        .addUserOption(opt => opt.setName('buyer').setDescription('Select the buyer').setRequired(true)),
 
     new SlashCommandBuilder()
         .setName('pay')
@@ -262,7 +274,7 @@ async function handleStickyCommand(interaction) {
 // --- /vouch Command Handler ---
 async function handleVouchCommand(interaction) {
     const buyer = interaction.options.getUser('buyer');
-    const vouchCode = interaction.options.getString('vouch-code');
+    const vouchCode = generateUniqueVouchCode();
 
     const now = Date.now();
     const expiryTime = now + (12 * 60 * 60 * 1000);
@@ -295,7 +307,7 @@ _ _`;
     });
 
     await interaction.reply({ 
-        content: `✅ Vouch timer sent for ${buyer} (Code: \`${vouchCode}\`).`, 
+        content: `✅ Vouch timer sent for ${buyer} (Generated Code: \`${vouchCode}\`).`, 
         flags: MessageFlags.Ephemeral 
     });
 
