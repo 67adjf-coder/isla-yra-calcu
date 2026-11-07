@@ -136,17 +136,13 @@ client.on('messageCreate', async (message) => {
     if (activeStickies.has(message.channel.id)) {
         const stickyData = activeStickies.get(message.channel.id);
         
-        // Delete old sticky message if it exists
         if (stickyData.lastMessageId) {
             try {
                 const oldMsg = await message.channel.messages.fetch(stickyData.lastMessageId).catch(() => null);
                 if (oldMsg) await oldMsg.delete();
-            } catch (e) {
-                // Ignore if already deleted
-            }
+            } catch (e) {}
         }
 
-        // Send a fresh sticky message at the bottom
         try {
             const stickyEmbed = new EmbedBuilder()
                 .setColor(PASTEL_BLUE)
@@ -232,14 +228,12 @@ async function handleStickyCommand(interaction) {
     if (subcommand === 'enable') {
         const customMessage = interaction.options.getString('message');
 
-        // Send the initial sticky message
         const stickyEmbed = new EmbedBuilder()
             .setColor(PASTEL_BLUE)
             .setDescription(`_ _\n${customMessage}\n_ _`);
 
         const sentMsg = await interaction.channel.send({ embeds: [stickyEmbed] });
 
-        // Store sticky settings for this channel
         activeStickies.set(channelId, {
             message: customMessage,
             lastMessageId: sentMsg.id
@@ -295,7 +289,15 @@ _ _`;
         .setColor(PASTEL_BLUE)
         .setDescription(vouchEmbedDescription);
 
-    const sentMessage = await interaction.reply({ embeds: [embed], fetchReply: true });
+    const sentMessage = await interaction.channel.send({ 
+        content: `${buyer}`, 
+        embeds: [embed] 
+    });
+
+    await interaction.reply({ 
+        content: `✅ Vouch timer sent for ${buyer} (Code: \`${vouchCode}\`).`, 
+        flags: MessageFlags.Ephemeral 
+    });
 
     setTimeout(async () => {
         const currentVouchState = activeVouches.get(vouchCode);
@@ -315,7 +317,10 @@ _ _`;
      you cɑnnot  creɑte ɑ  tix
      for 24 hours;  temp  bɑn.
 _ _`;
-                await targetChannel.send({ content: `<@${currentVouchState.buyerId}>`, embeds: [new EmbedBuilder().setColor(PASTEL_BLUE).setDescription(penaltyMessage)] });
+                await targetChannel.send({ 
+                    content: `<@${currentVouchState.buyerId}>`, 
+                    embeds: [new EmbedBuilder().setColor(PASTEL_BLUE).setDescription(penaltyMessage)] 
+                });
             }
 
             try {
