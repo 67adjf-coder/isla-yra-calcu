@@ -144,7 +144,7 @@ client.once('ready', async () => {
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
 
-    // --- Sticky Message Repost Handler ---
+    // --- Sticky Message Repost Handler (Plain Text) ---
     if (activeStickies.has(message.channel.id)) {
         const stickyData = activeStickies.get(message.channel.id);
         
@@ -156,11 +156,7 @@ client.on('messageCreate', async (message) => {
         }
 
         try {
-            const stickyEmbed = new EmbedBuilder()
-                .setColor(PASTEL_BLUE)
-                .setDescription(`_ _\n${stickyData.message}\n_ _`);
-
-            const newStickyMsg = await message.channel.send({ embeds: [stickyEmbed] });
+            const newStickyMsg = await message.channel.send({ content: stickyData.message });
             stickyData.lastMessageId = newStickyMsg.id;
         } catch (e) {
             console.error('Failed to repost sticky message:', e);
@@ -240,11 +236,7 @@ async function handleStickyCommand(interaction) {
     if (subcommand === 'enable') {
         const customMessage = interaction.options.getString('message');
 
-        const stickyEmbed = new EmbedBuilder()
-            .setColor(PASTEL_BLUE)
-            .setDescription(`_ _\n${customMessage}\n_ _`);
-
-        const sentMsg = await interaction.channel.send({ embeds: [stickyEmbed] });
+        const sentMsg = await interaction.channel.send({ content: customMessage });
 
         activeStickies.set(channelId, {
             message: customMessage,
