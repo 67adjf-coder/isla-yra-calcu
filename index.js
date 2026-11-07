@@ -8,11 +8,9 @@ const {
     ButtonBuilder, 
     ButtonStyle, 
     EmbedBuilder, 
-    AttachmentBuilder, 
     MessageFlags 
 } = require('discord.js');
 const express = require('express');
-const axios = require('axios');
 require('dotenv').config();
 
 // ==========================================
@@ -132,8 +130,8 @@ client.on('messageCreate', async (message) => {
                 if (!vouchData.fulfilled) {
                     vouchData.fulfilled = true;
                     try {
-                        await message.react('<:proc:1556231449055862824>');
-                        await message.react('<a:spiral:1555857356082909315>');
+                        await message.react('<a:a009_bluebow1491899840941129808:1555584862511956129>');
+                        await message.react('<:001:1568197288608665701>');
                     } catch (e) {
                         console.error('Failed to react to vouch message:', e);
                     }
@@ -274,15 +272,9 @@ async function handlePayCommand(interaction) {
         maximumFractionDigits: 2
     });
 
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const imageUrl = 'https://cdn.discordapp.com/attachments/1560207522521022494/1568499475004260503/yra_gcash.png?ex=6af00a78&is=6aeeb8f8&hm=b469c05251d56e50c5ea02977884fc9a9258e42dce7aa43be3b67fd6c80df3c2';
 
-    try {
-        const imageUrl = 'https://cdn.discordapp.com/attachments/1560207522521022494/1568499475004260503/yra_gcash.png?ex=6af00a78&is=6aeeb8f8&hm=b469c05251d56e50c5ea02977884fc9a9258e42dce7aa43be3b67fd6c80df3c2';
-        const response = await axios.get(imageUrl, { responseType: 'arraybuffer' });
-        const buffer = Buffer.from(response.data);
-        const attachment = new AttachmentBuilder(buffer, { name: 'yra_gcash.png' });
-
-        const embedDescription = 
+    const embedDescription = 
 `_ _
        <:yellowdns:1568478334906667019><:yellowdns:1568478334906667019><:yellowdns:1568478334906667019><:yellowdns:1568478334906667019><:yellowdns:1568478334906667019><:yellowdns:1568478334906667019><:yellowdns:1568478334906667019>
           **ƒor gcɑsh pɑyment :**
@@ -297,29 +289,24 @@ async function handlePayCommand(interaction) {
 -# _ _   <:zz_blueheart3:1555584821529546752>   extra ɑmount sent ɑre tippies !
 _ _`;
 
-        const copyButton = new ButtonBuilder()
-            .setCustomId('copy_acc_number')
-            .setLabel('copy acc number')
-            .setStyle(ButtonStyle.Secondary);
+    const copyButton = new ButtonBuilder()
+        .setCustomId('copy_acc_number')
+        .setLabel('copy acc number')
+        .setStyle(ButtonStyle.Secondary);
 
-        const row = new ActionRowBuilder().addComponents(copyButton);
+    const row = new ActionRowBuilder().addComponents(copyButton);
 
-        const embed = new EmbedBuilder()
-            .setColor(PASTEL_BLUE)
-            .setDescription(embedDescription)
-            .setImage('attachment://yra_gcash.png');
+    const embed = new EmbedBuilder()
+        .setColor(PASTEL_BLUE)
+        .setDescription(embedDescription)
+        .setImage(imageUrl);
 
-        await interaction.channel.send({
-            embeds: [embed],
-            files: [attachment],
-            components: [row]
-        });
+    await interaction.channel.send({
+        embeds: [embed],
+        components: [row]
+    });
 
-        await interaction.editReply({ content: '✅ Payment embed sent successfully to the channel!' });
-    } catch (err) {
-        console.error('Failed to load GCash QR image:', err);
-        await interaction.editReply({ content: '❌ Failed to fetch or send the payment QR code image.' });
-    }
+    return interaction.reply({ content: '✅ Payment embed sent successfully to the channel!', flags: MessageFlags.Ephemeral });
 }
 
 // --- /calcu Command Handler ---
