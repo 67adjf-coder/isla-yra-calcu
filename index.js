@@ -101,7 +101,7 @@ const commands = [
 
 client.once('ready', async () => {
     console.log(`Logged in as ${client.user.tag}`);
-    client.user.setActivity('vouch within 12 hours !', { type: 3 }); // Watching status
+    client.user.setActivity('vouch within 12 hours !', { type: 3 });
     const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
     try {
         await rest.put(
@@ -115,12 +115,11 @@ client.once('ready', async () => {
 });
 
 // ==========================================
-// 3. EVENT LISTENERS (VOUCH TRACKING & TICKET RESTRICTIONS)
+// 3. EVENT LISTENERS (VOUCH TRACKING)
 // ==========================================
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
 
-    // Monitor the specific vouch channel for the correct vouch format
     if (message.channel.id === VOUCH_CHANNEL_ID) {
         const content = message.content;
         const vouchRegex = /^i\s+lav\s+coastal\s+cart:\s+for\s+.+?\+\s*.+?\s+and\s+(\S+)\s+.+?!$/is;
@@ -151,7 +150,6 @@ client.on('interactionCreate', async (interaction) => {
     if (interaction.isChatInputCommand()) {
         const member = interaction.member;
 
-        // Optional safety: restrict ticket-related commands or check role restrictions if any
         if (interaction.commandName === 'sticky' || interaction.commandName === 'vouch') {
             if (!member || !member.roles.cache.has(STAFF_ROLE_ID)) {
                 return interaction.reply({ content: 'You do not have permission to use this command.', flags: MessageFlags.Ephemeral });
@@ -228,7 +226,6 @@ _ _`;
 
     const sentMessage = await interaction.reply({ embeds: [embed], fetchReply: true });
 
-    // 12-Hour Expiry Timer
     setTimeout(async () => {
         const currentVouchState = activeVouches.get(vouchCode);
         if (currentVouchState && !currentVouchState.fulfilled) {
