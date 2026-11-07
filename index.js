@@ -29,7 +29,7 @@ const PASTEL_BLUE = 0xAEC6CF;
 
 // Active tracking stores
 const activeVouches = new Map();
-const activeStickies = new Map(); // Map<channelId, { message, lastMessageId }>
+const processedInteractions = new Set();
 
 // Helper to generate a random unique 6-character alphanumeric code
 function generateUniqueVouchCode() {
@@ -57,23 +57,6 @@ const client = new Client({
 // 2. SLASH COMMAND DEFINITIONS & REGISTRATION
 // ==========================================
 const commands = [
-    new SlashCommandBuilder()
-        .setName('sticky')
-        .setDescription('Manage channel sticky messages')
-        .addSubcommand(sub =>
-            sub.setName('enable')
-               .setDescription('Enable a sticky message at the bottom of the channel')
-               .addStringOption(opt => 
-                   opt.setName('message')
-                      .setDescription('The message to stick to the bottom of the channel.')
-                      .setRequired(true)
-               )
-        )
-        .addSubcommand(sub =>
-            sub.setName('disable')
-               .setDescription('Disable the sticky message in this channel')
-        ),
-
     new SlashCommandBuilder()
         .setName('vouch')
         .setDescription('Create a vouch timer and requirement for a buyer')
@@ -139,29 +122,10 @@ client.once('ready', async () => {
 });
 
 // ==========================================
-// 3. EVENT LISTENERS (VOUCHES & STICKY REPOSTING)
+// 3. EVENT LISTENERS (VOUCHES)
 // ==========================================
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
-
-    // --- Sticky Message Repost Handler (Plain Text) ---
-    if (activeStickies.has(message.channel.id)) {
-        const stickyData = activeStickies.get(message.channel.id);
-        
-        if (stickyData.lastMessageId) {
-            try {
-                const oldMsg = await message.channel.messages.fetch(stickyData.lastMessageId).catch(() => null);
-                if (oldMsg) await oldMsg.delete();
-            } catch (e) {}
-        }
-
-        try {
-            const newStickyMsg = await message.channel.send({ content: stickyData.message });
-            stickyData.lastMessageId = newStickyMsg.id;
-        } catch (e) {
-            console.error('Failed to repost sticky message:', e);
-        }
-    }
 
     // --- Vouch Channel Format Listener ---
     if (message.channel.id === VOUCH_CHANNEL_ID) {
@@ -191,18 +155,21 @@ client.on('messageCreate', async (message) => {
 // 4. CENTRAL INTERACTION ROUTER
 // ==========================================
 client.on('interactionCreate', async (interaction) => {
+    // Guard against duplicate interaction processing
+    if (processedInteractions.has(interaction.id)) return;
+    processedInteractions.add(interaction.id);
+    setTimeout(() => processedInteractions.delete(interaction.id), 10000);
+
     if (interaction.isChatInputCommand()) {
         const member = interaction.member;
 
-        if (interaction.commandName === 'sticky' || interaction.commandName === 'vouch') {
+        if (interaction.commandName === 'vouch') {
             if (!member || !member.roles.cache.has(STAFF_ROLE_ID)) {
                 return interaction.reply({ content: 'You do not have permission to use this command.', flags: MessageFlags.Ephemeral });
             }
         }
 
         switch (interaction.commandName) {
-            case 'sticky':
-                return await handleStickyCommand(interaction);
             case 'vouch':
                 return await handleVouchCommand(interaction);
             case 'pay':
@@ -227,41 +194,6 @@ client.on('interactionCreate', async (interaction) => {
 // ==========================================
 // 5. COMMAND HANDLERS
 // ==========================================
-
-// --- /sticky Command Handler ---
-async function handleStickyCommand(interaction) {
-    const subcommand = interaction.options.getSubcommand();
-    const channelId = interaction.channelId;
-
-    if (subcommand === 'enable') {
-        const customMessage = interaction.options.getString('message');
-
-        const sentMsg = await interaction.channel.send({ content: customMessage });
-
-        activeStickies.set(channelId, {
-            message: customMessage,
-            lastMessageId: sentMsg.id
-        });
-
-        return interaction.reply({ content: '✅ Sticky message enabled successfully!', flags: MessageFlags.Ephemeral });
-    } 
-    else if (subcommand === 'disable') {
-        if (!activeStickies.has(channelId)) {
-            return interaction.reply({ content: '❌ There is no active sticky message in this channel.', flags: MessageFlags.Ephemeral });
-        }
-
-        const stickyData = activeStickies.get(channelId);
-        if (stickyData.lastMessageId) {
-            try {
-                const oldMsg = await interaction.channel.messages.fetch(stickyData.lastMessageId).catch(() => null);
-                if (oldMsg) await oldMsg.delete();
-            } catch (e) {}
-        }
-
-        activeStickies.delete(channelId);
-        return interaction.reply({ content: '✅ Sticky message disabled for this channel.', flags: MessageFlags.Ephemeral });
-    }
-}
 
 // --- /vouch Command Handler ---
 async function handleVouchCommand(interaction) {
