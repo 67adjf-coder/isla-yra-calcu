@@ -4,9 +4,15 @@ const {
     SlashCommandBuilder, 
     REST, 
     Routes, 
-    EmbedBuilder 
+    ActionRowBuilder, 
+    ButtonBuilder, 
+    ButtonStyle, 
+    EmbedBuilder, 
+    AttachmentBuilder, 
+    MessageFlags 
 } = require('discord.js');
 const express = require('express');
+const axios = require('axios');
 require('dotenv').config();
 
 // ==========================================
@@ -15,16 +21,23 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 10000;
 
-app.get('/', (req, res) => res.send('Payment and Calculator Bot is online.'));
+app.get('/', (req, res) => res.send('Coastal Cart Bot is online.'));
 app.listen(PORT, '0.0.0.0', () => console.log(`Web server listening on port ${PORT}`));
 
+const STAFF_ROLE_ID = '1533372358755221566';
+const NO_VOUCH_ROLE_ID = '1557329338943283240';
+const VOUCH_CHANNEL_ID = '1507271897962778706';
 const PASTEL_BLUE = 0xAEC6CF;
+
+// Active vouch trackers: Map<vouchCode, { buyerId, channelId, expiresAt, fulfilled }>
+const activeVouches = new Map();
 
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent
+        GatewayIntentBits.MessageContent,
+        GatewayIntentBits.GuildMembers
     ]
 });
 
@@ -33,8 +46,18 @@ const client = new Client({
 // ==========================================
 const commands = [
     new SlashCommandBuilder()
+        .setName('sticky')
+        .setDescription('Send a sticky message panel'),
+
+    new SlashCommandBuilder()
+        .setName('vouch')
+        .setDescription('Create a vouch timer and requirement for a buyer')
+        .addUserOption(opt => opt.setName('buyer').setDescription('Select the buyer').setRequired(true))
+        .addStringOption(opt => opt.setName('vouch-code').setDescription('Enter the unique vouch code').setRequired(true)),
+
+    new SlashCommandBuilder()
         .setName('pay')
-        .setDescription('Send a payment requirement embed')
+        .setDescription('Send a payment requirement embed with GCash details and QR code')
         .addNumberOption(option =>
             option.setName('price')
                 .setDescription('The total amount to pay')
@@ -78,6 +101,7 @@ const commands = [
 
 client.once('ready', async () => {
     console.log(`Logged in as ${client.user.tag}`);
+    client.user.setActivity('vouch within 12 hours !', { type: 3 }); // Watching status
     const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
     try {
         await rest.put(
@@ -91,26 +115,159 @@ client.once('ready', async () => {
 });
 
 // ==========================================
-// 3. CENTRAL INTERACTION ROUTER
+// 3. EVENT LISTENERS (VOUCH TRACKING & TICKET RESTRICTIONS)
 // ==========================================
-client.on('interactionCreate', async (interaction) => {
-    if (!interaction.isChatInputCommand()) return;
+client.on('messageCreate', async (message) => {
+    if (message.author.bot) return;
 
-    switch (interaction.commandName) {
-        case 'pay':
-            return await handlePayCommand(interaction);
-        case 'calcu':
-            return await handleCalcuCommand(interaction);
-        case 'roblox-calcu':
-            return await handleRobloxCalcuCommand(interaction);
-        default:
-            break;
+    // Monitor the specific vouch channel for the correct vouch format
+    if (message.channel.id === VOUCH_CHANNEL_ID) {
+        const content = message.content;
+        const vouchRegex = /^i\s+lav\s+coastal\s+cart:\s+for\s+.+?\+\s*.+?\s+and\s+(\S+)\s+.+?!$/is;
+        const match = content.match(vouchRegex);
+
+        if (match) {
+            const usedCode = match[1];
+            if (activeVouches.has(usedCode)) {
+                const vouchData = activeVouches.get(usedCode);
+                if (!vouchData.fulfilled) {
+                    vouchData.fulfilled = true;
+                    try {
+                        await message.react('<:proc:1556231449055862824>');
+                        await message.react('<a:spiral:1555857356082909315>');
+                    } catch (e) {
+                        console.error('Failed to react to vouch message:', e);
+                    }
+                }
+            }
+        }
     }
 });
 
 // ==========================================
-// 4. COMMAND HANDLERS
+// 4. CENTRAL INTERACTION ROUTER
 // ==========================================
+client.on('interactionCreate', async (interaction) => {
+    if (interaction.isChatInputCommand()) {
+        const member = interaction.member;
+
+        // Optional safety: restrict ticket-related commands or check role restrictions if any
+        if (interaction.commandName === 'sticky' || interaction.commandName === 'vouch') {
+            if (!member || !member.roles.cache.has(STAFF_ROLE_ID)) {
+                return interaction.reply({ content: 'You do not have permission to use this command.', flags: MessageFlags.Ephemeral });
+            }
+        }
+
+        switch (interaction.commandName) {
+            case 'sticky':
+                return await handleStickyCommand(interaction);
+            case 'vouch':
+                return await handleVouchCommand(interaction);
+            case 'pay':
+                return await handlePayCommand(interaction);
+            case 'calcu':
+                return await handleCalcuCommand(interaction);
+            case 'roblox-calcu':
+                return await handleRobloxCalcuCommand(interaction);
+            default:
+                break;
+        }
+    } else if (interaction.isButton()) {
+        if (interaction.customId === 'copy_acc_number') {
+            return await interaction.reply({ 
+                content: 'Your account number is: `0969 323 8079`', 
+                flags: MessageFlags.Ephemeral 
+            });
+        }
+    }
+});
+
+// ==========================================
+// 5. COMMAND HANDLERS
+// ==========================================
+
+// --- /sticky Command Handler ---
+async function handleStickyCommand(interaction) {
+    const stickyEmbed = new EmbedBuilder()
+        .setColor(PASTEL_BLUE)
+        .setDescription('_ _\n📌 **Sticky Announcement Panel**\nKeep this channel updated and check pinned information regularly.\n_ _');
+
+    await interaction.reply({ content: 'Sticky message sent successfully!', flags: MessageFlags.Ephemeral });
+    await interaction.channel.send({ embeds: [stickyEmbed] });
+}
+
+// --- /vouch Command Handler ---
+async function handleVouchCommand(interaction) {
+    const buyer = interaction.options.getUser('buyer');
+    const vouchCode = interaction.options.getString('vouch-code');
+
+    const now = Date.now();
+    const expiryTime = now + (12 * 60 * 60 * 1000);
+    const countdownString = `<t:${Math.floor(expiryTime / 1000)}:R>`;
+
+    activeVouches.set(vouchCode, {
+        buyerId: buyer.id,
+        channelId: interaction.channelId,
+        expiresAt: expiryTime,
+        fulfilled: false
+    });
+
+    const vouchEmbedDescription = 
+`_ _
+ vouch your ιtems wιthιn 12 hours:
+ follow the vouch formɑt gιven <:022:1567870763246161940> 
+_ _
+<:locket:1560692689513746487> your vouch code is:
+\` ${vouchCode} \`
+-# ${buyer}, you hɑve ${countdownString} to vouch !
+_ _`;
+
+    const embed = new EmbedBuilder()
+        .setColor(PASTEL_BLUE)
+        .setDescription(vouchEmbedDescription);
+
+    const sentMessage = await interaction.reply({ embeds: [embed], fetchReply: true });
+
+    // 12-Hour Expiry Timer
+    setTimeout(async () => {
+        const currentVouchState = activeVouches.get(vouchCode);
+        if (currentVouchState && !currentVouchState.fulfilled) {
+            try {
+                await sentMessage.react('<:proc:1556231449055862824>');
+                await sentMessage.react('<a:spiral:1555857356082909315>');
+            } catch (err) {
+                console.error('Failed to add expiration reactions:', err);
+            }
+
+            const targetChannel = await client.channels.fetch(currentVouchState.channelId).catch(() => null);
+            if (targetChannel) {
+                const penaltyMessage = 
+`_ _
+     ur wɑrrɑntιe's voιded <:022:1567870763246161940> 
+     you cɑnnot  creɑte ɑ  tix
+     for 24 hours;  temp  bɑn.
+_ _`;
+                await targetChannel.send({ content: `<@${currentVouchState.buyerId}>`, embeds: [new EmbedBuilder().setColor(PASTEL_BLUE).setDescription(penaltyMessage)] });
+            }
+
+            try {
+                const guild = interaction.guild;
+                const targetMember = await guild.members.fetch(currentVouchState.buyerId).catch(() => null);
+                if (targetMember) {
+                    await targetMember.roles.add(NO_VOUCH_ROLE_ID);
+
+                    setTimeout(async () => {
+                        await targetMember.roles.remove(NO_VOUCH_ROLE_ID).catch(() => {});
+                    }, 24 * 60 * 60 * 1000);
+                }
+            } catch (err) {
+                console.error('Failed to assign warranty void role:', err);
+            }
+
+            activeVouches.delete(vouchCode);
+        }
+    }, 12 * 60 * 60 * 1000);
+}
 
 // --- /pay Command Handler ---
 async function handlePayCommand(interaction) {
@@ -120,25 +277,52 @@ async function handlePayCommand(interaction) {
         maximumFractionDigits: 2
     });
 
-    const embed = new EmbedBuilder()
-        .setColor(PASTEL_BLUE)
-        .setDescription(
-            `_ _\n` +
-            `     ੭      ֹ      \` solitudꫀ \`         🏹𓏼\n` +
-            `-# _ _         thᥱ   pαymᥱnt   is   rᥱquirᥱd   !\n\n` +
-            `﹌﹌﹌﹌﹌﹌﹌﹌﹌﹌﹌﹌﹌﹌﹌﹌\n` +
-            `>   **totαl αmount to pαy:**   \` ₱     ${formattedPrice} \`\n\n` +
-            `>        \`   0969   323   8079 \`  \n` +
-            `> -# _ _        nᥱᥱd α qr? αsk __αwαy__ !\n\n` +
-            `﹌﹌﹌﹌﹌﹌﹌﹌﹌﹌﹌﹌﹌﹌﹌﹌\n` +
-            `-# _ _     send us the screenshot  of  the  receipt\n` +
-            `-# _ _     sαved screenshots will not be credited\n` +
-            `-# _ _     αnd α  trαnsαction history is required  !\n` +
-            `_ _`
-        );
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-    await interaction.channel.send({ embeds: [embed] });
-    return interaction.reply({ content: '✅ Payment embed sent successfully!', ephemeral: true });
+    try {
+        const imageUrl = 'https://cdn.discordapp.com/attachments/1560207522521022494/1568499475004260503/yra_gcash.png?ex=6af00a78&is=6aeeb8f8&hm=b469c05251d56e50c5ea02977884fc9a9258e42dce7aa43be3b67fd6c80df3c2';
+        const response = await axios.get(imageUrl, { responseType: 'arraybuffer' });
+        const buffer = Buffer.from(response.data);
+        const attachment = new AttachmentBuilder(buffer, { name: 'yra_gcash.png' });
+
+        const embedDescription = 
+`_ _
+       <:yellowdns:1568478334906667019><:yellowdns:1568478334906667019><:yellowdns:1568478334906667019><:yellowdns:1568478334906667019><:yellowdns:1568478334906667019><:yellowdns:1568478334906667019><:yellowdns:1568478334906667019>
+          **ƒor gcɑsh pɑyment :**
+-# _ _         qr code included. scan !
+
+> -# _ _   <:025:1567870892082470992>   \` 0969 323 8079  \`
+> -# _ _   <:025:1567870892082470992>   \` A.F. \` ɑcc initiɑls
+
+> -# _ _   **totαl αmount to pαy:**   \` ₱     ${formattedPrice} \`
+
+-# _ _   <:zz_blueheart3:1555584821529546752>   send **screenshot** of the receipt
+-# _ _   <:zz_blueheart3:1555584821529546752>   extra ɑmount sent ɑre tippies !
+_ _`;
+
+        const copyButton = new ButtonBuilder()
+            .setCustomId('copy_acc_number')
+            .setLabel('copy acc number')
+            .setStyle(ButtonStyle.Secondary);
+
+        const row = new ActionRowBuilder().addComponents(copyButton);
+
+        const embed = new EmbedBuilder()
+            .setColor(PASTEL_BLUE)
+            .setDescription(embedDescription)
+            .setImage('attachment://yra_gcash.png');
+
+        await interaction.channel.send({
+            embeds: [embed],
+            files: [attachment],
+            components: [row]
+        });
+
+        await interaction.editReply({ content: '✅ Payment embed sent successfully to the channel!' });
+    } catch (err) {
+        console.error('Failed to load GCash QR image:', err);
+        await interaction.editReply({ content: '❌ Failed to fetch or send the payment QR code image.' });
+    }
 }
 
 // --- /calcu Command Handler ---
@@ -148,7 +332,6 @@ async function handleCalcuCommand(interaction) {
     try {
         let processedExpr = exprInput.trim().toLowerCase();
 
-        // 1. Roblox Tax shorthands (ct & nct)
         if (/^\d+(?:\.\d+)?\s*ct$/.test(processedExpr)) {
             const target = parseFloat(processedExpr);
             const listPrice = Math.ceil(target / 0.7);
@@ -167,10 +350,7 @@ async function handleCalcuCommand(interaction) {
             return interaction.reply({ embeds: [embed] });
         }
 
-        // 2. Square root function support
         processedExpr = processedExpr.replace(/sqrt\s*\(([^)]+)\)/g, 'Math.sqrt($1)');
-
-        // 3. Shorthand multipliers 'k' and 'm'
         processedExpr = processedExpr.replace(/(\d+(?:\.\d+)?)\s*([km])/gi, (match, num, suffix) => {
             const multiplier = suffix.toLowerCase() === 'k' ? 1000 : 1000000;
             return parseFloat(num) * multiplier;
@@ -179,14 +359,14 @@ async function handleCalcuCommand(interaction) {
         if (!/^[\d\+\-\*\/\.\(\)\sMath\.sqrt]+$/.test(processedExpr)) {
             return interaction.reply({ 
                 content: '❌ Invalid expression! Use numbers, operators (+, -, *, /), k/m shorthand, sqrt(), or tax shorthand (ct/nct).', 
-                ephemeral: true 
+                flags: MessageFlags.Ephemeral 
             });
         }
 
         const result = Function('"use strict";return (' + processedExpr + ')')();
 
         if (isNaN(result) || !isFinite(result)) {
-            return interaction.reply({ content: '❌ Invalid mathematical calculation result.', ephemeral: true });
+            return interaction.reply({ content: '❌ Invalid mathematical calculation result.', flags: MessageFlags.Ephemeral });
         }
 
         const embed = new EmbedBuilder()
@@ -195,7 +375,7 @@ async function handleCalcuCommand(interaction) {
 
         return interaction.reply({ embeds: [embed] });
     } catch (err) {
-        return interaction.reply({ content: '❌ Failed to calculate expression. Please check your format (e.g., `1.5k + 500`, `sqrt(144)`, `100ct`).', ephemeral: true });
+        return interaction.reply({ content: '❌ Failed to calculate expression. Please check your format (e.g., `1.5k + 500`, `sqrt(144)`, `100ct`).', flags: MessageFlags.Ephemeral });
     }
 }
 
