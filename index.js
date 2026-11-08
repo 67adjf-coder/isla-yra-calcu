@@ -1,3 +1,4 @@
+```javascript
 const { 
     Client, 
     GatewayIntentBits, 
@@ -122,30 +123,26 @@ client.once('ready', async () => {
 });
 
 // ==========================================
-// 3. EVENT LISTENERS (VOUCHES)
+// 3. EVENT LISTENERS (VOUCH AUTO-DETECTION & REACTIONS)
 // ==========================================
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
 
-    // --- Vouch Channel Format Listener ---
+    // Monitor the designated vouch channel
     if (message.channel.id === VOUCH_CHANNEL_ID) {
         const content = message.content;
-        const vouchRegex = /^i\s+lav\s+coastal\s+cart:\s+for\s+.+?\+\s*.+?\s+and\s+(\S+)\s+.+?!$/is;
-        const match = content.match(vouchRegex);
 
-        if (match) {
-            const usedCode = match[1];
-            if (activeVouches.has(usedCode)) {
-                const vouchData = activeVouches.get(usedCode);
-                if (!vouchData.fulfilled) {
-                    vouchData.fulfilled = true;
-                    try {
-                        await message.react('<a:a009_bluebow1491899840941129808:1555584862511956129>');
-                        await message.react('<:001:1568197288608665701>');
-                    } catch (e) {
-                        console.error('Failed to react to vouch message:', e);
-                    }
+        // Check if any active vouch code is present anywhere in the message
+        for (const [vouchCode, vouchData] of activeVouches.entries()) {
+            if (!vouchData.fulfilled && content.includes(vouchCode)) {
+                vouchData.fulfilled = true;
+                try {
+                    await message.react('<a:a009_bluebow1491899840941129808:1555584862511956129>');
+                    await message.react('<:001:1568197288608665701>');
+                } catch (e) {
+                    console.error('Failed to react to vouch message:', e);
                 }
+                break;
             }
         }
     }
@@ -234,6 +231,23 @@ _ _`;
         content: `✅ Vouch timer sent for ${buyer} (Generated Code: \`${vouchCode}\`).`, 
         flags: MessageFlags.Ephemeral 
     });
+
+    // Send DM to the buyer containing their vouch code details
+    try {
+        const dmMessage = 
+`_ _
+    your vouch code : \` ${vouchCode} \` 
+    is vɑlid to be used incɑse  of  reports
+    ɑnd issues. wrong  vouch  codes  will
+    result to voided reports. thank u sm!
+_ _
+-# use  this  for  premiums  ɑnd  commies  only  !
+-# disregard this message if  bought other items
+_ _`;
+        await buyer.send({ embeds: [new EmbedBuilder().setColor(PASTEL_BLUE).setDescription(dmMessage)] });
+    } catch (err) {
+        console.error('Could not send DM to buyer:', err);
+    }
 
     setTimeout(async () => {
         const currentVouchState = activeVouches.get(vouchCode);
@@ -418,3 +432,5 @@ async function handleRobloxCalcuCommand(interaction) {
 }
 
 client.login(process.env.DISCORD_TOKEN);
+
+```
