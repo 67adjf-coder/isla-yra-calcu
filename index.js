@@ -1,4 +1,3 @@
-```javascript
 const { 
     Client, 
     GatewayIntentBits, 
@@ -432,5 +431,3 @@ async function handleRobloxCalcuCommand(interaction) {
 }
 
 client.login(process.env.DISCORD_TOKEN);
-
-```
