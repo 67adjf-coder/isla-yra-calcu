@@ -25,9 +25,10 @@ app.listen(PORT, '0.0.0.0', () => console.log(`Web server listening on port ${PO
 const STAFF_ROLE_ID = '1533372358755221566';
 const NO_VOUCH_ROLE_ID = '1557329338943283240';
 const VOUCH_CHANNEL_ID = '1507271897962778706';
+const VOUCH_CHANNEL_URL = 'https://discord.com/channels/1507214174084927498/1507271897962778706';
 const PASTEL_BLUE = 0xAEC6CF;
 
-// Active tracking stores
+// Active tracking stores: Map<vouchCode, { buyerId, channelId, expiresAt, fulfilled, wrongFormatCount }>
 const activeVouches = new Map();
 const processedInteractions = new Set();
 
@@ -122,7 +123,7 @@ client.once('ready', async () => {
 });
 
 // ==========================================
-// 3. EVENT LISTENERS (VOUCH AUTO-DETECTION & REACTIONS)
+// 3. EVENT LISTENERS (VOUCH AUTO-DETECTION & VALIDATION)
 // ==========================================
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
@@ -131,9 +132,20 @@ client.on('messageCreate', async (message) => {
     if (message.channel.id === VOUCH_CHANNEL_ID) {
         const content = message.content;
 
-        // Check if any active vouch code is present anywhere in the message
+        // Check if any active vouch code exists in this message
+        let matchedVouchCode = null;
         for (const [vouchCode, vouchData] of activeVouches.entries()) {
             if (!vouchData.fulfilled && content.includes(vouchCode)) {
+                matchedVouchCode = vouchCode;
+                break;
+            }
+        }
+
+        if (matchedVouchCode) {
+            const vouchData = activeVouches.get(matchedVouchCode);
+
+            // Verify if the message author matches the target buyer
+            if (message.author.id === vouchData.buyerId) {
                 vouchData.fulfilled = true;
                 try {
                     await message.react('<a:a009_bluebow1491899840941129808:1555584862511956129>');
@@ -141,7 +153,63 @@ client.on('messageCreate', async (message) => {
                 } catch (e) {
                     console.error('Failed to react to vouch message:', e);
                 }
-                break;
+                activeVouches.delete(matchedVouchCode);
+            }
+        } else {
+            // If someone posted in the vouch channel without any valid active code, check if it was sent by a tracked buyer within their window
+            // Or if they used an incorrect code / wrong form
+            for (const [vouchCode, vouchData] of activeVouches.entries()) {
+                if (!vouchData.fulfilled && message.author.id === vouchData.buyerId) {
+                    // Trigger immediate warranty void for wrong code/form usage
+                    try {
+                        await message.react('<:proc:1556231449055862824>');
+                        await message.react('<a:spiral:1555857356082909315>');
+                    } catch (err) {}
+
+                    const channelButton = new ButtonBuilder()
+                        .setLabel('go to vouch channel')
+                        .setStyle(ButtonStyle.Link)
+                        .setURL(VOUCH_CHANNEL_URL);
+
+                    const row = new ActionRowBuilder().addComponents(channelButton);
+
+                    const penaltyMessage = 
+`_ _
+     ur wɑrrɑntιe's voιded <:022:1567870763246161940> 
+     you cɑnnot  creɑte ɑ  tix
+     for 24 hours;  temp  bɑn.
+_ _`;
+
+                    const penaltyEmbed = new EmbedBuilder()
+                        .setColor(PASTEL_BLUE)
+                        .setDescription(penaltyMessage);
+
+                    await message.channel.send({ 
+                        content: `<@${vouchData.buyerId}>`, 
+                        embeds: [penaltyEmbed],
+                        components: [row]
+                    });
+
+                    try {
+                        await message.author.send({ 
+                            embeds: [penaltyEmbed],
+                            components: [row]
+                        });
+                    } catch (dmErr) {}
+
+                    try {
+                        const member = await message.guild.members.fetch(vouchData.buyerId).catch(() => null);
+                        if (member) {
+                            await member.roles.add(NO_VOUCH_ROLE_ID);
+                            setTimeout(async () => {
+                                await member.roles.remove(NO_VOUCH_ROLE_ID).catch(() => {});
+                            }, 24 * 60 * 60 * 1000);
+                        }
+                    } catch (roleErr) {}
+
+                    activeVouches.delete(vouchCode);
+                    break;
+                }
             }
         }
     }
@@ -151,7 +219,6 @@ client.on('messageCreate', async (message) => {
 // 4. CENTRAL INTERACTION ROUTER
 // ==========================================
 client.on('interactionCreate', async (interaction) => {
-    // Guard against duplicate interaction processing
     if (processedInteractions.has(interaction.id)) return;
     processedInteractions.add(interaction.id);
     setTimeout(() => processedInteractions.delete(interaction.id), 10000);
@@ -217,13 +284,21 @@ _ _
 -# ${buyer}, you hɑve ${countdownString} to vouch !
 _ _`;
 
+    const channelButton = new ButtonBuilder()
+        .setLabel('go to vouch channel')
+        .setStyle(ButtonStyle.Link)
+        .setURL(VOUCH_CHANNEL_URL);
+
+    const row = new ActionRowBuilder().addComponents(channelButton);
+
     const embed = new EmbedBuilder()
         .setColor(PASTEL_BLUE)
         .setDescription(vouchEmbedDescription);
 
     const sentMessage = await interaction.channel.send({ 
         content: `${buyer}`, 
-        embeds: [embed] 
+        embeds: [embed],
+        components: [row]
     });
 
     await interaction.reply({ 
@@ -243,11 +318,15 @@ _ _
 -# use  this  for  premiums  ɑnd  commies  only  !
 -# disregard this message if  bought other items
 _ _`;
-        await buyer.send({ embeds: [new EmbedBuilder().setColor(PASTEL_BLUE).setDescription(dmMessage)] });
+        await buyer.send({ 
+            embeds: [new EmbedBuilder().setColor(PASTEL_BLUE).setDescription(dmMessage)],
+            components: [row]
+        });
     } catch (err) {
         console.error('Could not send DM to buyer:', err);
     }
 
+    // 12-Hour Expiry Timer (Triggers only if they failed to vouch at all within 12 hours)
     setTimeout(async () => {
         const currentVouchState = activeVouches.get(vouchCode);
         if (currentVouchState && !currentVouchState.fulfilled) {
@@ -259,17 +338,35 @@ _ _`;
             }
 
             const targetChannel = await client.channels.fetch(currentVouchState.channelId).catch(() => null);
-            if (targetChannel) {
-                const penaltyMessage = 
+            const penaltyMessage = 
 `_ _
      ur wɑrrɑntιe's voιded <:022:1567870763246161940> 
      you cɑnnot  creɑte ɑ  tix
      for 24 hours;  temp  bɑn.
 _ _`;
+
+            const penaltyEmbed = new EmbedBuilder()
+                .setColor(PASTEL_BLUE)
+                .setDescription(penaltyMessage);
+
+            if (targetChannel) {
                 await targetChannel.send({ 
                     content: `<@${currentVouchState.buyerId}>`, 
-                    embeds: [new EmbedBuilder().setColor(PASTEL_BLUE).setDescription(penaltyMessage)] 
+                    embeds: [penaltyEmbed],
+                    components: [row]
                 });
+            }
+
+            try {
+                const buyerUser = await client.users.fetch(currentVouchState.buyerId).catch(() => null);
+                if (buyerUser) {
+                    await buyerUser.send({ 
+                        embeds: [penaltyEmbed],
+                        components: [row]
+                    });
+                }
+            } catch (dmErr) {
+                console.error('Could not send warranty void DM to buyer:', dmErr);
             }
 
             try {
